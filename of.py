@@ -1,4 +1,4 @@
-from .net import Model
+from net import Model
 import torch
 import numpy as np
 from functools import partial
@@ -18,11 +18,10 @@ class OpticalFlow:
 
     Parameters
     ----------
-        imsize (tuple): (height, width) of the resulting optical flow
         model (str): Name of a file with the model parameters. Default: ./data/model/model.pth
         cuda (bool): Indicator of using GPU. Default: True.
     '''
-    def __init__(self, imsize,
+    def __init__(self,
             model=osp.join(script_dir, 'data/model/model.pth'),
             cuda=True):
 
@@ -33,13 +32,12 @@ class OpticalFlow:
             self._device = torch.device('cpu')
             self._back = lambda x: x.detach().numpy()
         self._net = Model(device=self._device)
+        print(model)
         self._net.load_state_dict(torch.load(model, map_location=self._device))
         self._net.to(device=self._device)
         self._net.eval()
 
-        self.imsize = imsize
-
-    def __call__(self, events, start, stop, return_all=False):
+    def __call__(self, events, imsize, start, stop, return_all=False):
         ''' Computes optical flow for the input window of events.
         It supports raw events and visualized version of events.
 
@@ -54,7 +52,7 @@ class OpticalFlow:
         -------
             of (np.ndarray): The computed optical flow as 3D tensor with depth 2.
         '''
-        flow = self._net(*self._preprocess(events, start, stop), self.imsize)
+        flow = self._net(*self._preprocess(events, start, stop), imsize)
         return self._postprocess(flow, return_all)
 
     def _collate(self, events, start, stop):

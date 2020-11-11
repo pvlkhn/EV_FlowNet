@@ -87,14 +87,15 @@ def compute_event_image(events, start, stop, imsize):
     if uniq_b.size < bs:
         # seems, there is an empty set of events along samples
         pass
+
     shift = np.zeros(bs, dtype=int)
     shift[uniq_b] = np.cumsum(num_events) - 1
     #shift = np.cumsum(num_events) - 1
 
     tmp = shift[uniq_b]
-    assert(np.all(b[tmp] == uniq_b))
-    assert(np.all(b[tmp[:-1]+1] > uniq_b[:-1]))
-    assert(tmp[-1] + 1 == b.size)
+    # assert(np.all(b[tmp] == uniq_b))
+    # assert(np.all(b[tmp[:-1]+1] > uniq_b[:-1]))
+    # assert(tmp[-1] + 1 == b.size)
 
     start_ts = start[b]
     stop_ts = t[shift[b]]
