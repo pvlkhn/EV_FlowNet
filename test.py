@@ -1,28 +1,14 @@
-from pathlib import Path
-import imageio
-from imageio import imwrite
-from skimage.color import hsv2rgb
+import argparse
 import numpy as np
+import os
 from tqdm import tqdm
 
-import sys
-cur_path = Path(__file__).parent.resolve()
-module_name = cur_path.name
-sys.path.append(str(cur_path.parent))
-OpticalFlow = __import__(module_name).OpticalFlow
+from imageio import imwrite
+from skimage.color import hsv2rgb
 
-data_base = cur_path/'data'/'events'
-out_path = cur_path/'res'
-out_path.mkdir(parents=True, exist_ok=True)
+from of import OpticalFlow
+from data_loaders import NumpyEventsAdapter, RosbagEventsAdapter
 
-# events. Note that polarity values are in {-1, +1}
-events = np.load(str(data_base/'dvs0.npy'))
-# number of frames per second
-fps = 120
-# height and width of images
-imsize = 480, 640
-# window size in microseconds
-dt = 1. / fps
 
 def vis_flow(flow):
     mag = np.linalg.norm(flow, axis=2)
@@ -41,12 +27,14 @@ def vis_flow(flow):
     flow_rgb = hsv2rgb(hsv)
     return 255 - (flow_rgb * 255).astype(np.uint8)
 
+
 def vis_events(events, imsize):
     res = np.zeros(imsize, dtype=np.uint8).ravel()
     x, y = map(lambda x: x.astype(int), events[:2])
     i = np.ravel_multi_index([y, x], imsize)
     np.maximum.at(res, i, np.full_like(x, 255, dtype=np.uint8))
     return np.tile(res.reshape(imsize)[..., None], (1, 1, 3))
+
 
 def collage(flow_rgb, events_rgb):
     flow_rgb = flow_rgb[::-1]
@@ -67,25 +55,40 @@ def collage(flow_rgb, events_rgb):
         k = l
     return res
 
-of = OpticalFlow(imsize)
 
-x, y, t, p = events
+def apply(arguments):
+    events_adapter = RosbagEventsAdapter if arguments.use_bag_file else NumpyEventsAdapter
+    events = events_adapter(arguments.input_path, arguments.fps)
 
-start_t = t[0]
-stop_t = t[-1]
-frame_ts = np.arange(start_t, stop_t, dt)
-frame_ts = np.append(frame_ts, [frame_ts[-1] + dt])
-num_frames = len(frame_ts) - 1
+    of = OpticalFlow(cuda=arguments.use_cuda)
 
-idx_array = np.searchsorted(t, frame_ts)
-for i, (b, e) in tqdm(enumerate(zip(idx_array[:-1], idx_array[1:])), total = num_frames):
-    # events of the current sliding window
-    frame_events = [x[b:e] for x in events]
-    # predicted optical flow. Batch size is equal to 1
-    flow = of([frame_events], [frame_ts[i]], [frame_ts[i+1]], return_all=True)
-    flow = tuple(map(np.squeeze, flow))
-    # visualization
-    events_rgb = vis_events(frame_events, imsize)
-    flow_rgb = list(map(vis_flow, flow))
-    imwrite(str(out_path/'{:04d}.jpg'.format(i+1)),
-            collage(flow_rgb, events_rgb))
+    os.makedirs(arguments.output_path, exist_ok=True)
+
+    with tqdm(total=len(events)) as progress_bar:
+        for i, (progress, frame_events, iamge_shape, frame_start, frame_end) in enumerate(events):
+            # events of the current sliding window
+            # predicted optical flow. Batch size is equal to 1
+            flow = of([frame_events], iamge_shape, [frame_start], [frame_end], return_all=True)
+            flow = tuple(map(np.squeeze, flow))
+            # visualization
+            events_rgb = vis_events(frame_events, iamge_shape)
+            flow_rgb = list(map(vis_flow, flow))
+            out_path = os.path.join(arguments.output_path, '{:04d}.jpg'.format(i + 1))
+            imwrite(out_path, collage(flow_rgb, events_rgb))
+
+            progress_bar.n = progress
+            progress_bar.refresh()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Apply EV_FlowNet")
+
+    cur_path = os.path.dirname(os.path.abspath(__file__))
+    parser.add_argument("--input_path", type=str, default=os.path.join(cur_path, 'data', 'events', 'dvs0.npy'))
+    parser.add_argument("--output_path", type=str, default=os.path.join(cur_path, 'output'))
+    parser.add_argument("--use_cuda", type=bool, default=False)
+    parser.add_argument("--use_bag_file", type=bool, default=False)
+    parser.add_argument("--fps", type=int, default=120)
+    arguments = parser.parse_args()
+
+    apply(arguments)
